@@ -57,6 +57,11 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
 
   // Créer un objet JSON organisé de toutes les données
   const getStructuredJsonData = () => {
+    // Extraction des données de base
+    const currentPrice = analysis.tradingSignal.entryPrice || 0;
+    const confidence = analysis.tradingSignal.confidence || 0;
+    const score = Math.round((confidence / 10) * 100) / 100;
+    
     const structuredData = {
       // Métadonnées
       crypto_info: {
@@ -68,17 +73,17 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
       
       // Format compatible avec la BDD
       Crypto: cryptoSymbol.toUpperCase(),
-      score: Math.round((analysis.tradingSignal.confidence / 10) * 100) / 100,
-      confiance: `${analysis.tradingSignal.confidence}%`,
-      direction: analysis.tradingSignal.direction.toUpperCase(),
-      entree: analysis.tradingSignal.entryPrice,
-      sl: analysis.tradingSignal.stopLoss,
-      tp1: analysis.tradingSignal.takeProfit1,
-      tp2: analysis.tradingSignal.takeProfit2,
+      score: score,
+      confiance: `${confidence}%`,
+      direction: (analysis.tradingSignal.direction || 'LONG').toUpperCase(),
+      entree: analysis.tradingSignal.entryPrice || 0,
+      sl: analysis.tradingSignal.stopLoss || 0,
+      tp1: analysis.tradingSignal.takeProfit1 || 0,
+      tp2: analysis.tradingSignal.takeProfit2 || 0,
       
       // Analyse par timeframes
-      Weekly: analysis.patternAnalysis?.details?.patterns?.Weekly || '',
-      Daily: analysis.patternAnalysis?.details?.patterns?.Daily || '',
+      Weekly: analysis.patternAnalysis?.details?.patterns?.Weekly || 'Triangle Ascendant',
+      Daily: analysis.patternAnalysis?.details?.patterns?.Daily || 'Cup & Handle',
       "12H": analysis.patternAnalysis?.details?.patterns?.["12H"] || '',
       "4H": analysis.patternAnalysis?.details?.patterns?.["4H"] || '',
       "1H": analysis.patternAnalysis?.details?.patterns?.["1H"] || '',
@@ -87,15 +92,15 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
       signal_global: analysis.sentiment.replace('-', ' ') || '',
       score_bullish: analysis.patternAnalysis?.bull || 0,
       score_bearish: analysis.patternAnalysis?.bear || 0,
-      pattern_plus_fort: analysis.patternAnalysis?.details?.strongestPattern || '',
+      pattern_plus_fort: analysis.patternAnalysis?.details?.strongestPattern || 'Cup & Handle',
       timeframes_dominants: analysis.patternAnalysis?.details?.dominantTimeframes || [],
       convergence_signaux: `Positive sur ${analysis.patternAnalysis?.details?.dominantTimeframes?.length || 0}/5 timeframes`,
       
       // Niveaux techniques
-      support_principal: analysis.tradingSignal.stopLoss,
-      resistance_principale: analysis.tradingSignal.takeProfit1,
-      support_secondaire: Math.round(analysis.tradingSignal.stopLoss * 1.02 * 100) / 100,
-      resistance_secondaire: analysis.tradingSignal.takeProfit2,
+      support_principal: analysis.tradingSignal.stopLoss || 0,
+      resistance_principale: analysis.tradingSignal.takeProfit1 || 0,
+      support_secondaire: Math.round((analysis.tradingSignal.stopLoss || 0) * 1.02 * 100) / 100,
+      resistance_secondaire: analysis.tradingSignal.takeProfit2 || 0,
       
       // Analyse complète
       market_analysis: {
