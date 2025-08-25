@@ -166,9 +166,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </div>
                           <div>
                             <div className="text-white text-sm font-medium">
-                              {account.role === 'admin' ? 'Administrateur' : 
-                               account.email === 'premium@test.com' ? 'Membre Premium (99.90€)' :
-                               'Membre Basic (19.90€)'}
+                              {account.role === 'admin' ? 'Administrateur (admin)' : 
+                               account.email === 'premium@test.com' ? 'Membre Premium (premium123)' :
+                               'Membre Basic (member123)'}
                             </div>
                             <div className="text-gray-400 text-xs">{account.email}</div>
                           </div>

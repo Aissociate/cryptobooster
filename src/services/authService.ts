@@ -1,63 +1,61 @@
 import { User, LoginCredentials, RegisterCredentials, UserRole } from '../types/auth';
 import { Logger } from './logService';
 import { supabase } from '../lib/supabase';
+import bcrypt from 'bcryptjs';
+
+interface DatabaseUser {
+  id: string;
+  email: string;
+  password_hash: string;
+  name: string;
+  role: string;
+  subscription: string;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+  last_login: string | null;
+  settings: any;
+}
 
 export class AuthService {
+  // Comptes en dur pour développement/test
+  private static HARDCODED_ACCOUNTS = [
+    {
+      email: 'admin@cryptoai.com',
+      password: 'admin',
+      name: 'Administrateur',
+      role: 'admin' as UserRole,
+      subscription: 'pro'
+    },
+    {
+      email: 'member@test.com', 
+      password: 'member123',
+      name: 'Member Test',
+      role: 'member' as UserRole,
+      subscription: 'basic'
+    },
+    {
+      email: 'premium@test.com',
+      password: 'premium123', 
+      name: 'Premium User',
+      role: 'member' as UserRole,
+      subscription: 'premium'
+    }
+  ];
+
   static async getCurrentUser(): Promise<User | null> {
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      
-      if (error || !user) {
-        Logger.info('SYSTEM', 'Aucun utilisateur connecté');
+      const userJson = localStorage.getItem('currentUser');
+      if (!userJson) {
         return null;
       }
 
-      // Récupérer le profil utilisateur depuis user_profiles
-      const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profileError && profileError.code !== 'PGRST116') {
-        Logger.error('SYSTEM', 'Erreur récupération profil utilisateur', profileError);
-        return null;
-      }
-
-      // Si le profil n'existe pas, le créer
-      let userProfile = profile;
-      if (!profile) {
-        Logger.info('SYSTEM', `Création profil manquant pour utilisateur existant ${user.email}`);
-        const { data: newProfile, error: createError } = await supabase
-          .from('user_profiles')
-          .insert({
-            id: user.id,
-            name: user.user_metadata?.name || user.email?.split('@')[0] || 'Utilisateur',
-            subscription: 'free',
-            role: 'member'
-          })
-          .select()
-          .single();
-
-        if (createError) {
-          Logger.error('SYSTEM', 'Erreur création profil automatique', createError);
-          return null;
-        }
-        userProfile = newProfile;
-      }
-
-      return {
-        id: user.id,
-        name: userProfile.name,
-        email: user.email || '',
-        role: userProfile.role,
-        avatar: userProfile.avatar_url,
-        createdAt: new Date(userProfile.created_at),
-        lastLogin: userProfile.last_login ? new Date(userProfile.last_login) : undefined,
-        subscription: userProfile.subscription
-      };
+      const userData = JSON.parse(userJson);
+      Logger.info('SYSTEM', `Session restaurée pour ${userData.name}`);
+      return userData;
     } catch (error) {
-      Logger.error('SYSTEM', 'Erreur getCurrentUser', error);
+      Logger.error('SYSTEM', 'Erreur restauration session', error);
+      localStorage.removeItem('currentUser');
       return null;
     }
   }
@@ -66,86 +64,83 @@ export class AuthService {
     Logger.info('SYSTEM', `Tentative de connexion pour ${credentials.email}`);
     
     try {
-      // 1. Authentification Supabase
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: credentials.email,
-        password: credentials.password
-      });
+      // 1. Vérifier d'abord les comptes en dur
+      const hardcodedAccount = this.HARDCODED_ACCOUNTS.find(
+        account => account.email === credentials.email && account.password === credentials.password
+      );
+
+      if (hardcodedAccount) {
+        Logger.success('SYSTEM', `Connexion réussie avec compte en dur: ${hardcodedAccount.name}`);
+        const user: User = {
+          id: `hardcoded_${hardcodedAccount.email}`,
+          name: hardcodedAccount.name,
+          email: hardcodedAccount.email,
+          role: hardcodedAccount.role,
+          subscription: hardcodedAccount.subscription as any,
+          createdAt: new Date(),
+          lastLogin: new Date()
+        };
+
+        // Sauvegarder la session
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        return user;
+      }
+
+      // 2. Sinon, vérifier dans Supabase
+      const { data: dbUser, error } = await supabase
+        .from('simple_users')
+        .select('*')
+        .eq('email', credentials.email)
+        .maybeSingle();
 
       if (error) {
-        Logger.error('SYSTEM', `Erreur authentification: ${error.message}`);
+        Logger.error('SYSTEM', 'Erreur requête base de données', error);
+        throw new Error('Erreur de connexion à la base de données');
+      }
+
+      if (!dbUser) {
+        Logger.warning('SYSTEM', `Utilisateur non trouvé: ${credentials.email}`);
         throw new Error('Email ou mot de passe incorrect');
       }
 
-      if (!data.user) {
-        throw new Error('Erreur d\'authentification');
+      // 3. Vérifier le mot de passe
+      const isPasswordValid = await bcrypt.compare(credentials.password, dbUser.password_hash);
+      if (!isPasswordValid) {
+        Logger.warning('SYSTEM', `Mot de passe incorrect pour: ${credentials.email}`);
+        throw new Error('Email ou mot de passe incorrect');
       }
 
-      // 2. Récupérer ou créer le profil
-      let profile;
-      const { data: existingProfile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', data.user.id)
-        .single();
-
-      if (profileError) {
-        if (profileError.code === 'PGRST116') {
-          // Profil n'existe pas, le créer
-          Logger.info('SYSTEM', 'Création du profil manquant');
-          const { data: newProfile, error: createError } = await supabase
-            .from('user_profiles')
-            .insert({
-              id: data.user.id,
-              name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Utilisateur',
-              subscription: 'free',
-              role: 'member'
-            })
-            .select()
-            .single();
-          
-          if (createError) {
-            Logger.error('SYSTEM', 'Erreur création profil', createError);
-            throw new Error('Erreur création profil');
-          }
-          profile = newProfile;
-        } else {
-          Logger.error('SYSTEM', 'Erreur récupération profil', profileError);
-          throw new Error('Erreur accès profil');
-        }
-      } else {
-        profile = existingProfile;
-      }
-
-      // 3. Construire l'objet utilisateur
+      // 4. Créer l'objet User
       const user: User = {
-        id: data.user.id,
-        name: profile.name,
-        email: data.user.email || '',
-        role: profile.role,
-        avatar: profile.avatar_url,
-        createdAt: new Date(profile.created_at),
-        lastLogin: new Date(),
-        subscription: profile.subscription
+        id: dbUser.id,
+        name: dbUser.name,
+        email: dbUser.email,
+        role: dbUser.role as UserRole,
+        subscription: dbUser.subscription as any,
+        avatar: dbUser.avatar_url,
+        createdAt: new Date(dbUser.created_at),
+        lastLogin: new Date()
       };
 
-      // 4. Mise à jour last_login (optionnel, ne fait pas échouer)
+      // 5. Mettre à jour last_login
       try {
         await supabase
-          .from('user_profiles')
+          .from('simple_users')
           .update({ last_login: new Date().toISOString() })
-          .eq('id', data.user.id);
+          .eq('id', dbUser.id);
       } catch (updateError) {
         Logger.warning('SYSTEM', 'Impossible de mettre à jour last_login', updateError);
       }
 
+      // 6. Sauvegarder la session
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      
       Logger.success('SYSTEM', `Connexion réussie pour ${user.name}`);
       return user;
 
     } catch (error) {
-      Logger.error('SYSTEM', 'Erreur login complète', error);
-      const message = error instanceof Error ? error.message : 'Erreur de connexion';
-      throw new Error(message);
+      Logger.error('SYSTEM', 'Erreur complète de connexion', error);
+      throw error;
     }
   }
 
@@ -162,57 +157,63 @@ export class AuthService {
     }
 
     try {
-      // 1. Créer le compte Auth
-      const { data, error } = await supabase.auth.signUp({
-        email: credentials.email,
-        password: credentials.password,
-        options: {
-          data: {
-            name: credentials.name
-          }
-        }
-      });
+      // Vérifier si l'email existe déjà
+      const { data: existingUser } = await supabase
+        .from('simple_users')
+        .select('id')
+        .eq('email', credentials.email)
+        .maybeSingle();
+
+      if (existingUser) {
+        throw new Error('Un compte avec cet email existe déjà');
+      }
+
+      // Hasher le mot de passe
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(credentials.password, saltRounds);
+
+      // Créer l'utilisateur
+      const { data: newUser, error } = await supabase
+        .from('simple_users')
+        .insert({
+          email: credentials.email.toLowerCase(),
+          password_hash: passwordHash,
+          name: credentials.name,
+          role: 'member',
+          subscription: 'free'
+        })
+        .select()
+        .single();
 
       if (error) {
-        Logger.error('SYSTEM', `Erreur inscription: ${error.message}`);
-        throw new Error('Erreur récupération profil utilisateur');
+        Logger.error('SYSTEM', 'Erreur création utilisateur', error);
+        throw new Error('Erreur lors de la création du compte');
       }
 
-      if (!data.user) {
-        throw new Error('Erreur création utilisateur');
-      }
-
-      // 2. Le profil sera créé via trigger ou manuellement
-      const newUser: User = {
-        id: data.user.id,
-        name: credentials.name,
-        email: credentials.email.toLowerCase(),
-        role: 'member',
-        createdAt: new Date(),
-        subscription: 'free'
+      const user: User = {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role as UserRole,
+        subscription: newUser.subscription as any,
+        createdAt: new Date(newUser.created_at)
       };
 
-      Logger.success('SYSTEM', `Inscription réussie pour ${newUser.name}`);
-      return newUser;
+      // Sauvegarder la session
+      localStorage.setItem('currentUser', JSON.stringify(user));
+
+      Logger.success('SYSTEM', `Inscription réussie pour ${user.name}`);
+      return user;
 
     } catch (error) {
-      Logger.error('SYSTEM', 'Erreur register', error);
-      const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
-      throw new Error(message);
+      Logger.error('SYSTEM', 'Erreur inscription', error);
+      throw error;
     }
   }
 
   static async logout(): Promise<void> {
     Logger.info('SYSTEM', 'Déconnexion utilisateur');
-    
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        Logger.error('SYSTEM', 'Erreur logout', error);
-      }
-    } catch (error) {
-      Logger.error('SYSTEM', 'Erreur logout', error);
-    }
+    localStorage.removeItem('currentUser');
   }
 
   static hasRole(user: User | null, role: UserRole): boolean {
@@ -262,11 +263,11 @@ export class AuthService {
 
   // Obtenir des utilisateurs de test pour la démo
   static getTestAccounts() {
-    return [
-      { email: 'admin@cryptoai.com', password: 'admin123', role: 'admin' },
-      { email: 'member@test.com', password: 'member123', role: 'member' },
-      { email: 'premium@test.com', password: 'premium123', role: 'member' }
-    ];
+    return this.HARDCODED_ACCOUNTS.map(account => ({
+      email: account.email,
+      password: account.password,
+      role: account.role
+    }));
   }
 
   // Gestion du cooldown pour les membres gratuits
@@ -276,9 +277,8 @@ export class AuthService {
     }
 
     try {
-      // Vérifier la dernière demande via Supabase
       const { data, error } = await supabase
-        .from('user_profiles')
+        .from('simple_users')
         .select('settings')
         .eq('id', user.id)
         .single();
@@ -310,18 +310,14 @@ export class AuthService {
     if (user.subscription !== 'free') return;
 
     try {
-      const { error } = await supabase
-        .from('user_profiles')
+      await supabase
+        .from('simple_users')
         .update({ 
           settings: { 
             lastSignalRequest: new Date().toISOString() 
           } 
         })
         .eq('id', user.id);
-
-      if (error) {
-        Logger.error('SYSTEM', 'Erreur enregistrement demande signal', error);
-      }
     } catch (error) {
       Logger.error('SYSTEM', 'Erreur enregistrement demande signal', error);
     }

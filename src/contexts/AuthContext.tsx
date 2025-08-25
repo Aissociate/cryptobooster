@@ -55,8 +55,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Charger l'utilisateur au démarrage
   useEffect(() => {
     const loadUser = async () => {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      
       try {
         const user = await AuthService.getCurrentUser();
         if (user) {
@@ -68,33 +66,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (error) {
         Logger.error('SYSTEM', 'Erreur chargement session utilisateur', error);
-        dispatch({ type: 'SET_ERROR', payload: 'Erreur de chargement de session' });
+        dispatch({ type: 'SET_USER', payload: null });
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
     };
 
     loadUser();
-
-    // Écouter les changements d'authentification Supabase
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
-          const user = await AuthService.getCurrentUser();
-          dispatch({ type: 'SET_USER', payload: user });
-          if (user) {
-            SignalManager.setCurrentUser(user.id);
-          }
-        } else if (event === 'SIGNED_OUT') {
-          dispatch({ type: 'LOGOUT' });
-          SignalManager.setCurrentUser(null);
-        }
-      }
-    );
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
 
   const login = async (credentials: LoginCredentials) => {
