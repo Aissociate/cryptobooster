@@ -1,67 +1,40 @@
 import { User, LoginCredentials, RegisterCredentials, UserRole } from '../types/auth';
 import { Logger } from './logService';
-
-// Simulation d'une base de données utilisateurs
-const MOCK_USERS: Record<string, User & { password: string }> = {
-  'admin@cryptoai.com': {
-    id: '1',
-    name: 'Administrator',
-    email: 'admin@cryptoai.com',
-    password: 'admin123',
-    role: 'admin',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-    createdAt: new Date('2024-01-01'),
-    lastLogin: new Date(),
-    subscription: 'premium'
-  },
-  'member@test.com': {
-    id: '2',
-    name: 'Premium Member',
-    email: 'member@test.com',
-    password: 'member123',
-    role: 'member',
-    avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face',
-    createdAt: new Date('2024-01-15'),
-    lastLogin: new Date(),
-    subscription: 'basic'
-  },
-  'premium@test.com': {
-    id: '3',
-    name: 'Premium User',
-    email: 'premium@test.com',
-    password: 'premium123',
-    role: 'member',
-    avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=100&h=100&fit=crop&crop=face',
-    createdAt: new Date('2024-01-10'),
-    lastLogin: new Date(),
-    subscription: 'premium'
-  }
-};
+import { supabase } from '../lib/supabase';
 
 export class AuthService {
-  private static readonly STORAGE_KEY = 'cryptoai_auth_user';
-  private static readonly SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 heures
-
-  static getCurrentUser(): User | null {
+  static async getCurrentUser(): Promise<User | null> {
     try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (!stored) return null;
-
-      const { user, timestamp } = JSON.parse(stored);
+      const { data: { user }, error } = await supabase.auth.getUser();
       
-      // Vérifier si la session n'a pas expiré
-      if (Date.now() - timestamp > this.SESSION_DURATION) {
-        this.logout();
+      if (error || !user) {
+        return null;
+      }
+
+      // Récupérer le profil utilisateur depuis user_profiles
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) {
+        Logger.error('SYSTEM', 'Erreur récupération profil utilisateur', profileError);
         return null;
       }
 
       return {
-        ...user,
-        createdAt: new Date(user.createdAt),
-        lastLogin: user.lastLogin ? new Date(user.lastLogin) : undefined
+        id: user.id,
+        name: profile.name,
+        email: user.email || '',
+        role: profile.role,
+        avatar: profile.avatar_url,
+        createdAt: new Date(profile.created_at),
+        lastLogin: profile.last_login ? new Date(profile.last_login) : undefined,
+        subscription: profile.subscription
       };
     } catch (error) {
-      Logger.error('SYSTEM', 'Erreur lecture utilisateur courant', error);
+      Logger.error('SYSTEM', 'Erreur getCurrentUser', error);
       return null;
     }
   }
@@ -69,40 +42,56 @@ export class AuthService {
   static async login(credentials: LoginCredentials): Promise<User> {
     Logger.info('SYSTEM', `Tentative de connexion pour ${credentials.email}`);
     
-    // Simulation d'un délai API
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: credentials.email,
+        password: credentials.password
+      });
 
-    const mockUser = MOCK_USERS[credentials.email.toLowerCase()];
-    
-    if (!mockUser) {
-      Logger.warning('SYSTEM', `Utilisateur non trouvé: ${credentials.email}`);
-      throw new Error('Email ou mot de passe incorrect');
+      if (error) {
+        Logger.warning('SYSTEM', `Erreur connexion: ${error.message}`);
+        throw new Error('Email ou mot de passe incorrect');
+      }
+
+      if (!data.user) {
+        throw new Error('Aucun utilisateur retourné');
+      }
+
+      // Mettre à jour last_login
+      await supabase
+        .from('user_profiles')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', data.user.id);
+
+      // Récupérer le profil complet
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileError) {
+        throw new Error('Erreur récupération profil utilisateur');
+      }
+
+      const user: User = {
+        id: data.user.id,
+        name: profile.name,
+        email: data.user.email || '',
+        role: profile.role,
+        avatar: profile.avatar_url,
+        createdAt: new Date(profile.created_at),
+        lastLogin: new Date(),
+        subscription: profile.subscription
+      };
+
+      Logger.success('SYSTEM', `Connexion réussie pour ${user.name} (${user.role})`);
+      return user;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur de connexion';
+      Logger.error('SYSTEM', 'Erreur login', error);
+      throw new Error(message);
     }
-
-    if (mockUser.password !== credentials.password) {
-      Logger.warning('SYSTEM', `Mot de passe incorrect pour ${credentials.email}`);
-      throw new Error('Email ou mot de passe incorrect');
-    }
-
-    const user: User = {
-      id: mockUser.id,
-      name: mockUser.name,
-      email: mockUser.email,
-      role: mockUser.role,
-      avatar: mockUser.avatar,
-      createdAt: mockUser.createdAt,
-      lastLogin: new Date(),
-      subscription: mockUser.subscription
-    };
-
-    // Stocker l'utilisateur avec timestamp
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
-      user,
-      timestamp: Date.now()
-    }));
-
-    Logger.success('SYSTEM', `Connexion réussie pour ${user.name} (${user.role})`);
-    return user;
   }
 
   static async register(credentials: RegisterCredentials): Promise<User> {
@@ -117,43 +106,67 @@ export class AuthService {
       throw new Error('Le mot de passe doit contenir au moins 6 caractères');
     }
 
-    // Vérifier si l'email existe déjà
-    if (MOCK_USERS[credentials.email.toLowerCase()]) {
-      throw new Error('Cet email est déjà utilisé');
+    try {
+      // Créer le compte Supabase Auth
+      const { data, error } = await supabase.auth.signUp({
+        email: credentials.email,
+        password: credentials.password
+      });
+
+      if (error) {
+        Logger.warning('SYSTEM', `Erreur inscription: ${error.message}`);
+        throw new Error(error.message);
+      }
+
+      if (!data.user) {
+        throw new Error('Erreur création utilisateur');
+      }
+
+      // Créer le profil utilisateur
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .insert({
+          id: data.user.id,
+          name: credentials.name,
+          subscription: 'free',
+          role: 'member'
+        });
+
+      if (profileError) {
+        Logger.error('SYSTEM', 'Erreur création profil', profileError);
+        throw new Error('Erreur création profil utilisateur');
+      }
+
+      const newUser: User = {
+        id: data.user.id,
+        name: credentials.name,
+        email: credentials.email.toLowerCase(),
+        role: 'member',
+        createdAt: new Date(),
+        lastLogin: new Date(),
+        subscription: 'free'
+      };
+
+      Logger.success('SYSTEM', `Inscription réussie pour ${newUser.name} - Compte FREE créé`);
+      return newUser;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
+      Logger.error('SYSTEM', 'Erreur register', error);
+      throw new Error(message);
     }
-
-    // Simulation d'un délai API
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const newUser: User = {
-      id: Date.now().toString(),
-      name: credentials.name,
-      email: credentials.email.toLowerCase(),
-      role: 'member', // Nouveau utilisateur = membre par défaut
-      createdAt: new Date(),
-      lastLogin: new Date(),
-      subscription: 'free'
-    };
-
-    // Ajouter à la "base de données" mock
-    MOCK_USERS[credentials.email.toLowerCase()] = {
-      ...newUser,
-      password: credentials.password
-    };
-
-    // Stocker l'utilisateur
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
-      user: newUser,
-      timestamp: Date.now()
-    }));
-
-    Logger.success('SYSTEM', `Inscription réussie pour ${newUser.name} - Compte FREE créé`);
-    return newUser;
   }
 
-  static logout(): void {
+  static async logout(): Promise<void> {
     Logger.info('SYSTEM', 'Déconnexion utilisateur');
-    localStorage.removeItem(this.STORAGE_KEY);
+    
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        Logger.error('SYSTEM', 'Erreur logout', error);
+      }
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur logout', error);
+    }
   }
 
   static hasRole(user: User | null, role: UserRole): boolean {
@@ -211,34 +224,60 @@ export class AuthService {
   }
 
   // Gestion du cooldown pour les membres gratuits
-  private static readonly COOLDOWN_KEY = 'cryptoai_last_signal_request';
-
-  static canRequestSignal(user: User | null): { canRequest: boolean; remainingTime?: number } {
+  static async canRequestSignal(user: User | null): Promise<{ canRequest: boolean; remainingTime?: number }> {
     if (!user || user.subscription !== 'free') {
       return { canRequest: true };
     }
 
-    const lastRequest = localStorage.getItem(this.COOLDOWN_KEY);
-    if (!lastRequest) {
+    try {
+      // Vérifier la dernière demande via Supabase
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('settings')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !data?.settings?.lastSignalRequest) {
+        return { canRequest: true };
+      }
+
+      const lastRequestTime = new Date(data.settings.lastSignalRequest).getTime();
+      const now = Date.now();
+      const cooldownMs = 24 * 60 * 60 * 1000; // 24 heures
+      const remainingTime = cooldownMs - (now - lastRequestTime);
+
+      if (remainingTime <= 0) {
+        return { canRequest: true };
+      }
+
+      return { 
+        canRequest: false, 
+        remainingTime: Math.ceil(remainingTime / (60 * 60 * 1000)) // en heures
+      };
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur vérification cooldown', error);
       return { canRequest: true };
     }
-
-    const lastRequestTime = parseInt(lastRequest);
-    const now = Date.now();
-    const cooldownMs = 24 * 60 * 60 * 1000; // 24 heures
-    const remainingTime = cooldownMs - (now - lastRequestTime);
-
-    if (remainingTime <= 0) {
-      return { canRequest: true };
-    }
-
-    return { 
-      canRequest: false, 
-      remainingTime: Math.ceil(remainingTime / (60 * 60 * 1000)) // en heures
-    };
   }
 
-  static recordSignalRequest(): void {
-    localStorage.setItem(this.COOLDOWN_KEY, Date.now().toString());
+  static async recordSignalRequest(user: User): Promise<void> {
+    if (user.subscription !== 'free') return;
+
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ 
+          settings: { 
+            lastSignalRequest: new Date().toISOString() 
+          } 
+        })
+        .eq('id', user.id);
+
+      if (error) {
+        Logger.error('SYSTEM', 'Erreur enregistrement demande signal', error);
+      }
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur enregistrement demande signal', error);
+    }
   }
 }

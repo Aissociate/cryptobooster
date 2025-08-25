@@ -1,3 +1,6 @@
+import { supabase } from '../lib/supabase';
+import { Logger } from './logService';
+
 export interface TradingPosition {
   id: string;
   cryptoId: string;
@@ -35,7 +38,6 @@ class SignalManagerService {
   private positions: TradingPosition[] = [];
   private subscribers: ((positions: TradingPosition[]) => void)[] = [];
   private currentUserId: string | null = null;
-  private readonly STORAGE_KEY = 'cryptoai_trading_positions';
 
   constructor() {
     this.loadPositions();
@@ -46,33 +48,114 @@ class SignalManagerService {
     this.loadPositions();
   }
 
-  private loadPositions() {
-    try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        this.positions = parsed.map((pos: any) => ({
-          ...pos,
-          addedAt: new Date(pos.addedAt)
-        }));
-      } else {
-        this.positions = [];
-      }
+  private async loadPositions() {
+    if (!this.currentUserId) {
+      this.positions = [];
       this.notifySubscribers();
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('trading_positions')
+        .select('*')
+        .eq('user_id', this.currentUserId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      this.positions = (data || []).map((pos: any) => this.convertFromDatabase(pos));
+      this.notifySubscribers();
+      
+      Logger.success('SYSTEM', `${this.positions.length} positions chargées depuis Supabase`);
     } catch (error) {
-      console.error('Erreur chargement positions:', error);
+      Logger.error('SYSTEM', 'Erreur chargement positions depuis Supabase', error);
       this.positions = [];
       this.notifySubscribers();
     }
   }
 
-  private savePositions() {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.positions));
-      this.notifySubscribers();
-    } catch (error) {
-      console.error('Erreur sauvegarde positions:', error);
+  private async savePosition(position: TradingPosition) {
+    if (!this.currentUserId) {
+      Logger.warning('SYSTEM', 'Utilisateur non connecté - impossible de sauvegarder');
+      return;
     }
+
+    try {
+      const dbPosition = this.convertToDatabase(position);
+      
+      const { error } = await supabase
+        .from('trading_positions')
+        .upsert(dbPosition, { 
+          onConflict: 'id',
+          ignoreDuplicates: false 
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      Logger.success('SYSTEM', `Position ${position.cryptoSymbol} sauvegardée dans Supabase`);
+    } catch (error) {
+      Logger.error('SYSTEM', `Erreur sauvegarde position ${position.cryptoSymbol}`, error);
+      throw error;
+    }
+  }
+
+  private convertToDatabase(position: TradingPosition): any {
+    return {
+      id: position.id,
+      user_id: this.currentUserId,
+      crypto_id: position.cryptoId,
+      crypto_symbol: position.cryptoSymbol,
+      crypto_name: position.cryptoName,
+      crypto_image: position.cryptoImage,
+      trading_signal: {
+        direction: position.signal.direction,
+        entry_price: position.signal.entryPrice,
+        stop_loss: position.signal.stopLoss,
+        take_profit_1: position.signal.takeProfit1,
+        take_profit_2: position.signal.takeProfit2,
+        confidence: position.signal.confidence,
+        risk_reward_ratio: position.signal.riskRewardRatio
+      },
+      ai_analysis_data: position.aiAnalysis,
+      pattern_analysis: position.patternAnalysis,
+      status: position.status,
+      target_hit: position.targetHit || 'none',
+      notes: position.notes,
+      is_manually_edited: position.isManuallyEdited || false,
+      is_verified: position.isVerified || false
+    };
+  }
+
+  private convertFromDatabase(dbPosition: any): TradingPosition {
+    return {
+      id: dbPosition.id,
+      cryptoId: dbPosition.crypto_id,
+      cryptoSymbol: dbPosition.crypto_symbol,
+      cryptoName: dbPosition.crypto_name,
+      cryptoImage: dbPosition.crypto_image,
+      signal: {
+        direction: dbPosition.trading_signal.direction,
+        entryPrice: dbPosition.trading_signal.entry_price,
+        stopLoss: dbPosition.trading_signal.stop_loss,
+        takeProfit1: dbPosition.trading_signal.take_profit_1,
+        takeProfit2: dbPosition.trading_signal.take_profit_2,
+        confidence: dbPosition.trading_signal.confidence,
+        riskRewardRatio: dbPosition.trading_signal.risk_reward_ratio
+      },
+      aiAnalysis: dbPosition.ai_analysis_data,
+      patternAnalysis: dbPosition.pattern_analysis,
+      status: dbPosition.status,
+      addedAt: new Date(dbPosition.created_at),
+      notes: dbPosition.notes,
+      targetHit: dbPosition.target_hit,
+      isManuallyEdited: dbPosition.is_manually_edited,
+      isVerified: dbPosition.is_verified
+    };
   }
 
   private notifySubscribers() {
@@ -81,7 +164,7 @@ class SignalManagerService {
     });
   }
 
-  addPosition(crypto: any, analysis: any): TradingPosition {
+  async addPosition(crypto: any, analysis: any): Promise<TradingPosition> {
     const newPosition: TradingPosition = {
       id: `pos_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       cryptoId: crypto.id,
@@ -107,49 +190,137 @@ class SignalManagerService {
     };
 
     this.positions.unshift(newPosition);
-    this.savePositions();
+    await this.savePosition(newPosition);
+    this.notifySubscribers();
     return newPosition;
   }
 
-  removePosition(positionId: string): boolean {
-    const index = this.positions.findIndex(pos => pos.id === positionId);
-    if (index !== -1) {
-      this.positions.splice(index, 1);
-      this.savePositions();
+  async removePosition(positionId: string): Promise<boolean> {
+    if (!this.currentUserId) return false;
+
+    try {
+      const { error } = await supabase
+        .from('trading_positions')
+        .delete()
+        .eq('id', positionId)
+        .eq('user_id', this.currentUserId);
+
+      if (error) {
+        throw error;
+      }
+
+      const index = this.positions.findIndex(pos => pos.id === positionId);
+      if (index !== -1) {
+        this.positions.splice(index, 1);
+        this.notifySubscribers();
+      }
+
+      Logger.success('SYSTEM', `Position ${positionId} supprimée de Supabase`);
       return true;
+    } catch (error) {
+      Logger.error('SYSTEM', `Erreur suppression position ${positionId}`, error);
+      return false;
     }
-    return false;
   }
 
-  updatePositionStatus(positionId: string, status: TradingPosition['status'], targetHit?: TradingPosition['targetHit']): boolean {
-    const position = this.positions.find(pos => pos.id === positionId);
-    if (position) {
-      position.status = status;
-      if (targetHit) position.targetHit = targetHit;
-      this.savePositions();
+  async updatePositionStatus(positionId: string, status: TradingPosition['status'], targetHit?: TradingPosition['targetHit']): Promise<boolean> {
+    if (!this.currentUserId) return false;
+
+    try {
+      const updateData: any = { status };
+      if (targetHit) updateData.target_hit = targetHit;
+
+      const { error } = await supabase
+        .from('trading_positions')
+        .update(updateData)
+        .eq('id', positionId)
+        .eq('user_id', this.currentUserId);
+
+      if (error) {
+        throw error;
+      }
+
+      const position = this.positions.find(pos => pos.id === positionId);
+      if (position) {
+        position.status = status;
+        if (targetHit) position.targetHit = targetHit;
+        this.notifySubscribers();
+      }
+
+      Logger.success('SYSTEM', `Statut position ${positionId} mis à jour dans Supabase`);
       return true;
+    } catch (error) {
+      Logger.error('SYSTEM', `Erreur mise à jour statut position ${positionId}`, error);
+      return false;
     }
-    return false;
   }
 
-  updatePositionNotes(positionId: string, notes: string): boolean {
-    const position = this.positions.find(pos => pos.id === positionId);
-    if (position) {
-      position.notes = notes;
-      this.savePositions();
+  async updatePositionNotes(positionId: string, notes: string): Promise<boolean> {
+    if (!this.currentUserId) return false;
+
+    try {
+      const { error } = await supabase
+        .from('trading_positions')
+        .update({ notes })
+        .eq('id', positionId)
+        .eq('user_id', this.currentUserId);
+
+      if (error) {
+        throw error;
+      }
+
+      const position = this.positions.find(pos => pos.id === positionId);
+      if (position) {
+        position.notes = notes;
+        this.notifySubscribers();
+      }
+
+      Logger.success('SYSTEM', `Notes position ${positionId} mises à jour dans Supabase`);
       return true;
+    } catch (error) {
+      Logger.error('SYSTEM', `Erreur mise à jour notes position ${positionId}`, error);
+      return false;
     }
-    return false;
   }
 
-  updatePositionSignal(positionId: string, updatedSignal: TradingPosition['signal']): boolean {
-    const position = this.positions.find(pos => pos.id === positionId);
-    if (position) {
-      position.signal = updatedSignal;
-      this.savePositions();
+  async updatePositionSignal(positionId: string, updatedSignal: TradingPosition['signal']): Promise<boolean> {
+    if (!this.currentUserId) return false;
+
+    try {
+      const { error } = await supabase
+        .from('trading_positions')
+        .update({ 
+          trading_signal: {
+            direction: updatedSignal.direction,
+            entry_price: updatedSignal.entryPrice,
+            stop_loss: updatedSignal.stopLoss,
+            take_profit_1: updatedSignal.takeProfit1,
+            take_profit_2: updatedSignal.takeProfit2,
+            confidence: updatedSignal.confidence,
+            risk_reward_ratio: updatedSignal.riskRewardRatio
+          },
+          is_manually_edited: true
+        })
+        .eq('id', positionId)
+        .eq('user_id', this.currentUserId);
+
+      if (error) {
+        throw error;
+      }
+
+      const position = this.positions.find(pos => pos.id === positionId);
+      if (position) {
+        position.signal = updatedSignal;
+        position.isManuallyEdited = true;
+        this.notifySubscribers();
+      }
+
+      Logger.success('SYSTEM', `Signal position ${positionId} mis à jour dans Supabase`);
       return true;
+    } catch (error) {
+      Logger.error('SYSTEM', `Erreur mise à jour signal position ${positionId}`, error);
+      return false;
     }
-    return false;
   }
 
   getPosition(positionId: string): TradingPosition | undefined {
@@ -197,9 +368,26 @@ class SignalManagerService {
     };
   }
 
-  clearAllPositions() {
-    this.positions = [];
-    this.savePositions();
+  async clearAllPositions() {
+    if (!this.currentUserId) return;
+
+    try {
+      const { error } = await supabase
+        .from('trading_positions')
+        .delete()
+        .eq('user_id', this.currentUserId);
+
+      if (error) {
+        throw error;
+      }
+
+      this.positions = [];
+      this.notifySubscribers();
+      
+      Logger.success('SYSTEM', 'Toutes les positions supprimées de Supabase');
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur suppression toutes positions', error);
+    }
   }
 
   // Méthode pour vérifier les conditions de marché actuelles vs signaux

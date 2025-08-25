@@ -3,6 +3,7 @@ import { AuthContextType, AuthState, LoginCredentials, RegisterCredentials, User
 import { AuthService } from '../services/authService';
 import { SignalManager } from '../services/signalManager';
 import { Logger } from '../services/logService';
+import { supabase } from '../lib/supabase';
 
 // Actions
 type AuthAction = 
@@ -55,13 +56,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const loadUser = () => {
       try {
-        const user = AuthService.getCurrentUser();
-        dispatch({ type: 'SET_USER', payload: user });
-        
-        if (user) {
-          SignalManager.setCurrentUser(user.id);
-          Logger.info('SYSTEM', `Session restaurée pour ${user.name} (${user.role})`);
-        }
+        AuthService.getCurrentUser().then(user => {
+          dispatch({ type: 'SET_USER', payload: user });
+          
+          if (user) {
+            SignalManager.setCurrentUser(user.id);
+            Logger.info('SYSTEM', `Session restaurée pour ${user.name} (${user.role})`);
+          }
+        });
       } catch (error) {
         Logger.error('SYSTEM', 'Erreur chargement session utilisateur', error);
         dispatch({ type: 'SET_ERROR', payload: 'Erreur de chargement de session' });
@@ -71,6 +73,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     loadUser();
+
+    // Écouter les changements d'authentification Supabase
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user) {
+          const user = await AuthService.getCurrentUser();
+          dispatch({ type: 'SET_USER', payload: user });
+          if (user) {
+            SignalManager.setCurrentUser(user.id);
+          }
+        } else if (event === 'SIGNED_OUT') {
+          dispatch({ type: 'LOGOUT' });
+          SignalManager.setCurrentUser(null);
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (credentials: LoginCredentials) => {
