@@ -169,17 +169,6 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
               {analysis.tradingSignal.confidence}% Confidence
             </span>
           </motion.div>
-          
-          {!isEditing && (
-            <motion.button
-              onClick={handleEdit}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-800/50 rounded-lg transition-colors"
-              whileHover={{ scale: 1.1 }}
-              title="Éditer le signal"
-            >
-              <Edit3 className="w-4 h-4" />
-            </motion.button>
-          )}
         </div>
       </div>
 
