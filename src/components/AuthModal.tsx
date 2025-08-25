@@ -174,9 +174,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </div>
                         </div>
                         <div className="text-gray-500 text-xs">Cliquez pour utiliser</div>
-                      </motion.button>
+                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg mb-4"
                     ))}
-                  </div>
+                  <p className="text-red-400 text-sm">
+                    {error}
+                    {error.includes('email') && (
+                      <span className="block mt-1 text-xs text-red-300">
+                        💡 Vérifiez que votre email est correct et confirmé.
+                      </span>
+                    )}
+                  </p>
                 </div>
               )}
 

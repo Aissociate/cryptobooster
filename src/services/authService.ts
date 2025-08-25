@@ -8,6 +8,7 @@ export class AuthService {
       const { data: { user }, error } = await supabase.auth.getUser();
       
       if (error || !user) {
+        Logger.info('SYSTEM', 'Aucun utilisateur connecté');
         return null;
       }
 
@@ -16,22 +17,44 @@ export class AuthService {
         .from('user_profiles')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (profileError) {
+      if (profileError && profileError.code !== 'PGRST116') {
         Logger.error('SYSTEM', 'Erreur récupération profil utilisateur', profileError);
         return null;
       }
 
+      // Si le profil n'existe pas, le créer
+      let userProfile = profile;
+      if (!profile) {
+        Logger.info('SYSTEM', `Création profil manquant pour utilisateur existant ${user.email}`);
+        const { data: newProfile, error: createError } = await supabase
+          .from('user_profiles')
+          .insert({
+            id: user.id,
+            name: user.user_metadata?.name || user.email?.split('@')[0] || 'Utilisateur',
+            subscription: 'free',
+            role: 'member'
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          Logger.error('SYSTEM', 'Erreur création profil automatique', createError);
+          return null;
+        }
+        userProfile = newProfile;
+      }
+
       return {
         id: user.id,
-        name: profile.name,
+        name: userProfile.name,
         email: user.email || '',
-        role: profile.role,
-        avatar: profile.avatar_url,
-        createdAt: new Date(profile.created_at),
-        lastLogin: profile.last_login ? new Date(profile.last_login) : undefined,
-        subscription: profile.subscription
+        role: userProfile.role,
+        avatar: userProfile.avatar_url,
+        createdAt: new Date(userProfile.created_at),
+        lastLogin: userProfile.last_login ? new Date(userProfile.last_login) : undefined,
+        subscription: userProfile.subscription
       };
     } catch (error) {
       Logger.error('SYSTEM', 'Erreur getCurrentUser', error);
@@ -49,40 +72,77 @@ export class AuthService {
       });
 
       if (error) {
-        Logger.warning('SYSTEM', `Erreur connexion: ${error.message}`);
-        throw new Error('Email ou mot de passe incorrect');
+        Logger.warning('SYSTEM', `Erreur connexion Supabase: ${error.message}`);
+        if (error.message.includes('Invalid login credentials')) {
+          throw new Error('Email ou mot de passe incorrect');
+        }
+        if (error.message.includes('Email not confirmed')) {
+          throw new Error('Veuillez confirmer votre email avant de vous connecter');
+        }
+        throw new Error(error.message);
       }
 
       if (!data.user) {
-        throw new Error('Aucun utilisateur retourné');
+        Logger.error('SYSTEM', 'Aucun utilisateur retourné par Supabase Auth');
+        throw new Error('Erreur d\'authentification');
       }
 
-      // Mettre à jour last_login
-      await supabase
-        .from('user_profiles')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', data.user.id);
+      Logger.success('SYSTEM', `Authentification Supabase réussie pour ${data.user.email}`);
 
       // Récupérer le profil complet
       const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', data.user.id)
-        .single();
+        .maybeSingle();
 
-      if (profileError) {
+      if (profileError && profileError.code !== 'PGRST116') {
+        Logger.error('SYSTEM', 'Erreur récupération profil', profileError);
         throw new Error('Erreur récupération profil utilisateur');
+      }
+
+      // Si le profil n'existe pas, le créer
+      let userProfile = profile;
+      if (!profile) {
+        Logger.info('SYSTEM', `Création profil manquant pour ${data.user.email}`);
+        const { data: newProfile, error: createError } = await supabase
+          .from('user_profiles')
+          .insert({
+            id: data.user.id,
+            name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Utilisateur',
+            subscription: 'free',
+            role: 'member'
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          Logger.error('SYSTEM', 'Erreur création profil', createError);
+          throw new Error('Erreur création profil utilisateur');
+        }
+        userProfile = newProfile;
+      }
+
+      // Mettre à jour last_login
+      try {
+        await supabase
+          .from('user_profiles')
+          .update({ last_login: new Date().toISOString() })
+          .eq('id', data.user.id);
+      } catch (updateError) {
+        Logger.warning('SYSTEM', 'Erreur mise à jour last_login', updateError);
+        // Ne pas faire échouer la connexion pour ça
       }
 
       const user: User = {
         id: data.user.id,
-        name: profile.name,
+        name: userProfile.name,
         email: data.user.email || '',
-        role: profile.role,
-        avatar: profile.avatar_url,
-        createdAt: new Date(profile.created_at),
+        role: userProfile.role,
+        avatar: userProfile.avatar_url,
+        createdAt: new Date(userProfile.created_at),
         lastLogin: new Date(),
-        subscription: profile.subscription
+        subscription: userProfile.subscription
       };
 
       Logger.success('SYSTEM', `Connexion réussie pour ${user.name} (${user.role})`);
