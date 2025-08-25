@@ -2,6 +2,10 @@ import { User, LoginCredentials, RegisterCredentials, UserRole } from '../types/
 import { Logger } from './logService';
 import { supabase } from '../lib/supabase';
 import bcrypt from 'bcryptjs';
+import { v5 as uuidv5 } from 'uuid';
+
+// Namespace UUID pour générer des UUIDs consistants
+const NAMESPACE_UUID = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 
 interface DatabaseUser {
   id: string;
@@ -71,8 +75,12 @@ export class AuthService {
 
       if (hardcodedAccount) {
         Logger.success('SYSTEM', `Connexion réussie avec compte en dur: ${hardcodedAccount.name}`);
+        
+        // Générer un UUID consistant basé sur l'email
+        const consistentId = uuidv5(hardcodedAccount.email, NAMESPACE_UUID);
+        
         const user: User = {
-          id: `hardcoded_${hardcodedAccount.email}`,
+          id: consistentId,
           name: hardcodedAccount.name,
           email: hardcodedAccount.email,
           role: hardcodedAccount.role,

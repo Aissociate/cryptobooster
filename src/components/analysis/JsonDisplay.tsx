@@ -188,8 +188,8 @@ export const JsonDisplay: React.FC<JsonDisplayProps> = ({ jsonData, cryptoSymbol
             <div>
               <span className="text-gray-500">Généré le:</span>
               <div className="text-gray-300 font-mono text-xs mt-1">
-                {jsonData.generated_at || jsonData.metadata?.generated_at ? 
-                  new Date(jsonData.metadata.generated_at).toLocaleString('fr-FR') :
+                {jsonData.generated_at || (jsonData.metadata && jsonData.metadata.generated_at) ? 
+                  new Date(jsonData.generated_at || jsonData.metadata.generated_at).toLocaleString('fr-FR') :
                   new Date().toLocaleString('fr-FR')
                 }
               </div>
@@ -197,11 +197,11 @@ export const JsonDisplay: React.FC<JsonDisplayProps> = ({ jsonData, cryptoSymbol
             <div>
               <span className="text-gray-500">Statut:</span>
               <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
-                (jsonData.metadata?.is_verified || jsonData.crypto_info?.is_verified) ? 
+                ((jsonData.metadata && jsonData.metadata.is_verified) || (jsonData.crypto_info && jsonData.crypto_info.is_verified)) ? 
                 'bg-emerald-500/20 text-emerald-400' : 
                 'bg-gray-500/20 text-gray-400'
               }`}>
-                {(jsonData.metadata?.is_verified || jsonData.crypto_info?.is_verified) ? '✓ Vérifié' : '○ En attente'}
+                {((jsonData.metadata && jsonData.metadata.is_verified) || (jsonData.crypto_info && jsonData.crypto_info.is_verified)) ? '✓ Vérifié' : '○ En attente'}
               </span>
             </div>
           </div>
