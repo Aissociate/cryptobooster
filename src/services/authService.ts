@@ -175,7 +175,6 @@ export class AuthService {
 
       if (error) {
         Logger.error('SYSTEM', `Erreur inscription: ${error.message}`);
-        Logger.error('SYSTEM', 'Erreur récupération profil', profileError);
         throw new Error('Erreur récupération profil utilisateur');
       }
 
@@ -199,100 +198,6 @@ export class AuthService {
     } catch (error) {
       Logger.error('SYSTEM', 'Erreur register', error);
       const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
-      throw new Error(message);
-    }
-  }
-      }
-
-      // Mettre à jour last_login
-      try {
-        await supabase
-          .from('user_profiles')
-          .update({ last_login: new Date().toISOString() })
-          .eq('id', data.user.id);
-      } catch (updateError) {
-        Logger.warning('SYSTEM', 'Erreur mise à jour last_login', updateError);
-        // Ne pas faire échouer la connexion pour ça
-      }
-
-      const user: User = {
-        id: data.user.id,
-        name: userProfile.name,
-        email: data.user.email || '',
-        role: userProfile.role,
-        avatar: userProfile.avatar_url,
-        createdAt: new Date(userProfile.created_at),
-        lastLogin: new Date(),
-        subscription: userProfile.subscription
-      };
-
-      Logger.success('SYSTEM', `Connexion réussie pour ${user.name} (${user.role})`);
-      return user;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur de connexion';
-      Logger.error('SYSTEM', 'Erreur login', error);
-      throw new Error(message);
-    }
-  }
-
-  static async register(credentials: RegisterCredentials): Promise<User> {
-    Logger.info('SYSTEM', `Tentative d'inscription pour ${credentials.email}`);
-    
-    // Validation
-    if (credentials.password !== credentials.confirmPassword) {
-      throw new Error('Les mots de passe ne correspondent pas');
-    }
-
-    if (credentials.password.length < 6) {
-      throw new Error('Le mot de passe doit contenir au moins 6 caractères');
-    }
-
-    try {
-      // Créer le compte Supabase Auth
-      const { data, error } = await supabase.auth.signUp({
-        email: credentials.email,
-        password: credentials.password
-      });
-
-      if (error) {
-        Logger.warning('SYSTEM', `Erreur inscription: ${error.message}`);
-        throw new Error(error.message);
-      }
-
-      if (!data.user) {
-        throw new Error('Erreur création utilisateur');
-      }
-
-      // Créer le profil utilisateur
-      const { error: profileError } = await supabase
-        .from('user_profiles')
-        .insert({
-          id: data.user.id,
-          name: credentials.name,
-          subscription: 'free',
-          role: 'member'
-        });
-
-      if (profileError) {
-        Logger.error('SYSTEM', 'Erreur création profil', profileError);
-        throw new Error('Erreur création profil utilisateur');
-      }
-
-      const newUser: User = {
-        id: data.user.id,
-        name: credentials.name,
-        email: credentials.email.toLowerCase(),
-        role: 'member',
-        createdAt: new Date(),
-        lastLogin: new Date(),
-        subscription: 'free'
-      };
-
-      Logger.success('SYSTEM', `Inscription réussie pour ${newUser.name} - Compte FREE créé`);
-      return newUser;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
-      Logger.error('SYSTEM', 'Erreur register', error);
       throw new Error(message);
     }
   }
