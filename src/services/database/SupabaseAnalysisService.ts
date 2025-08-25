@@ -110,7 +110,6 @@ export class SupabaseAnalysisService {
         .eq('id', id)
         .select()
         .single();
-        crypto_name: crypto.name || '',
 
       if (error) {
         throw error;
@@ -119,24 +118,25 @@ export class SupabaseAnalysisService {
       Logger.success('DATABASE', `Analyse ${id} mise à jour`);
       return data;
     } catch (error) {
+      // Journaliser et propager l'erreur afin que l'appelant puisse la gérer
       Logger.error('DATABASE', `Erreur mise à jour ${id}`, error);
       throw error;
     }
   }
 
   /**
-   * Supprime une analyse
-        support_secondaire: (crypto.aiAnalysis.tradingSignal.stopLoss || 0) * 1.02,
-        resistance_secondaire: crypto.aiAnalysis.tradingSignal.takeProfit2 || 0,
+   * Supprime une analyse.
+   *
+   * Cette méthode supprime une entrée de la table `crypto_analyses` en se basant
+   * sur son identifiant unique. Elle retourne `true` en cas de succès et
+   * `false` en cas d'erreur. Toute erreur rencontrée est journalisée via
+   * le logger.
    */
   static async deleteAnalysis(id: string): Promise<boolean> {
     try {
       const { error } = await supabase
         .from('crypto_analyses')
-        .upsert(analysisData, { 
-          onConflict: 'crypto_symbol,created_by',
-          ignoreDuplicates: false 
-        });
+        .delete()
         .eq('id', id);
 
       if (error) {

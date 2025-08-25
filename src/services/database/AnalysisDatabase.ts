@@ -1,6 +1,12 @@
 export interface AnalysisRecord {
   id: string;
   crypto_symbol: string;
+  /**
+   * Nom lisible de la cryptomonnaie analysée.
+   * Cette propriété est optionnelle car certaines anciennes entrées de la base
+   * de données peuvent ne pas la renseigner.
+   */
+  crypto_name?: string;
   analysis_data: any;
   score: number;
   confidence: number;
@@ -33,6 +39,12 @@ export interface DatabaseQuery {
 
 export interface AnalysisInsert {
   crypto_symbol: string;
+  /**
+   * Nom lisible de la cryptomonnaie analysée.  
+   * Optionnel afin de permettre l'enregistrement de nouvelles analyses sans
+   * cette information tout en restant compatible avec les définitions de la
+   * table `crypto_analyses`.
+   */
   crypto_name?: string;
   analysis_data: any;
   score: number;
@@ -49,8 +61,6 @@ export interface AnalysisInsert {
   convergence_signaux: string;
   support_principal: number;
   resistance_principale: number;
-  support_secondaire: number;
-  resistance_secondaire: number;
   support_secondaire: number;
   resistance_secondaire: number;
   created_by: string;

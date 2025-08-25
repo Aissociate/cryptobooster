@@ -17,6 +17,8 @@ export class AnalysisProcessor {
 
     return {
       crypto_symbol: crypto.symbol.toLowerCase(),
+      // Nom lisible de la cryptomonnaie (utile pour certaines vues ou exports)
+      crypto_name: crypto.name,
       analysis_data: this.formatAnalysisData(crypto, analysis),
       score: crypto.aiScore || 0,
       confidence: signal.confidence || 0,

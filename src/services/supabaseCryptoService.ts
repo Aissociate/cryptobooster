@@ -146,63 +146,13 @@ export class SupabaseCryptoService {
   }
 
   /**
-   * Sauvegarde un snapshot global des cryptos
-   */
-  static async saveSnapshot(cryptos: EnhancedCrypto[], userId: string, snapshotType: string = 'manual'): Promise<void> {
-    try {
-      Logger.info('SUPABASE', `Sauvegarde snapshot ${snapshotType}`, { 
-        userId, 
-        cryptoCount: cryptos.length 
-      });
-
-      const snapshotData = {
-        crypto_id: `snapshot_${Date.now()}`,
-        snapshot_data: {
-          cryptos: cryptos.map(crypto => ({
-            id: crypto.id,
-            symbol: crypto.symbol,
-            name: crypto.name,
-            current_price: crypto.current_price,
-            market_cap_rank: crypto.market_cap_rank,
-            ai_score: crypto.aiScore,
-            has_analysis: !!crypto.aiAnalysis,
-            has_charts: !!crypto.chartUrls
-          })),
-          summary: {
-            total_cryptos: cryptos.length,
-            with_analysis: cryptos.filter(c => c.aiAnalysis).length,
-            with_charts: cryptos.filter(c => c.chartUrls).length,
-            avg_ai_score: cryptos.reduce((acc, c) => acc + c.aiScore, 0) / cryptos.length,
-            timestamp: new Date().toISOString()
-          }
-        },
-        ai_score: crypto.aiScore,
-        chart_urls: crypto.chartUrls,
-        timeframes: crypto.timeframes,
-        trends: crypto.trends,
-        created_by: userId
-      };
-
-      const { error } = await supabase
-        .from('crypto_analyses')
-        .upsert(analysisData, { 
-          onConflict: 'crypto_id,created_by',
-          ignoreDuplicates: false 
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      Logger.success('SUPABASE', `Analyse ${crypto.symbol} sauvegardée`, null, crypto.symbol);
-    } catch (error) {
-      Logger.error('SUPABASE', `Erreur sauvegarde analyse ${crypto.symbol}`, error, crypto.symbol);
-      throw error;
-    }
-  }
-
-  /**
-   * Sauvegarde un snapshot global des cryptos
+   * Sauvegarde un snapshot global des cryptos.
+   *
+   * Cette méthode construit un objet snapshot contenant la liste des cryptos,
+   * un résumé global et des métadonnées, puis insère cet enregistrement dans
+   * la table `crypto_snapshots`. Le snapshot est identifié par un `snapshot_id`
+   * unique basé sur la date et l'heure d'exécution. Si une erreur survient
+   * lors de l'insertion, celle‑ci est journalisée et propagée à l'appelant.
    */
   static async saveSnapshot(cryptos: EnhancedCrypto[], userId: string, snapshotType: string = 'manual'): Promise<void> {
     try {

@@ -41,6 +41,15 @@ export interface AnalysisResult {
     totalScore: number;
     dominantTimeframes: string[];
     strongestPattern: string;
+    /**
+     * Dictionnaire des patterns détectés par timeframe.  
+     * Les clés correspondent aux noms des timeframes (Monthly, Weekly, Daily, 4h, 1h)  
+     * et les valeurs au nom du pattern détecté sur ce timeframe.  
+     * Cette propriété est utilisée notamment lors de la conversion de
+     * l'analyse vers un format de base de données afin de conserver
+     * l'information de pattern par timeframe.
+     */
+    patterns: Record<string, string>;
   };
 }
 
@@ -100,6 +109,8 @@ export class PatternAnalyzer {
     let bullScore = 0;
     let bearScore = 0;
     const processedPatterns: Array<{timeframe: string, pattern: string, score: number, signal: string}> = [];
+    // Dictionnaire pour stocker le pattern détecté par timeframe
+    const patternsByTimeframe: Record<string, string> = {};
 
     for (const [timeframe, pattern] of Object.entries(selection)) {
       if (!pattern) continue;
@@ -128,6 +139,9 @@ export class PatternAnalyzer {
         score: power,
         signal
       });
+
+      // Enregistrer le pattern détecté pour ce timeframe dans le dictionnaire
+      patternsByTimeframe[timeframe] = pattern;
 
       // Répartir bull/bear
       if (signal === "Bullish") {
@@ -186,6 +200,8 @@ export class PatternAnalyzer {
         totalScore: Math.round(total * 100) / 100,
         dominantTimeframes,
         strongestPattern
+        ,
+        patterns: patternsByTimeframe
       }
     };
   }
