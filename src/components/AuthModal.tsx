@@ -174,8 +174,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </div>
                         </div>
                         <div className="text-gray-500 text-xs">Cliquez pour utiliser</div>
-                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg mb-4"
+                      </motion.button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Erreur */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg mb-4"
+                >
                   <p className="text-red-400 text-sm">
                     {error}
                     {error.includes('email') && (
@@ -184,7 +195,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </span>
                     )}
                   </p>
-                </div>
+                </motion.div>
               )}
 
               {/* Formulaire */}
