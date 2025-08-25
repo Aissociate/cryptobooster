@@ -54,16 +54,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Charger l'utilisateur au démarrage
   useEffect(() => {
-    const loadUser = () => {
+    const loadUser = async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      
       try {
-        AuthService.getCurrentUser().then(user => {
+        const user = await AuthService.getCurrentUser();
+        if (user) {
           dispatch({ type: 'SET_USER', payload: user });
-          
-          if (user) {
-            SignalManager.setCurrentUser(user.id);
-            Logger.info('SYSTEM', `Session restaurée pour ${user.name} (${user.role})`);
-          }
-        });
+          SignalManager.setCurrentUser(user.id);
+          Logger.info('SYSTEM', `Session restaurée pour ${user.name}`);
+        } else {
+          dispatch({ type: 'SET_USER', payload: null });
+        }
       } catch (error) {
         Logger.error('SYSTEM', 'Erreur chargement session utilisateur', error);
         dispatch({ type: 'SET_ERROR', payload: 'Erreur de chargement de session' });
@@ -103,10 +105,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const user = await AuthService.login(credentials);
       dispatch({ type: 'SET_USER', payload: user });
       SignalManager.setCurrentUser(user.id);
+      Logger.success('SYSTEM', 'Connexion réussie via contexte');
     } catch (error) {
+      Logger.error('SYSTEM', 'Erreur connexion via contexte', error);
       const message = error instanceof Error ? error.message : 'Erreur de connexion';
       dispatch({ type: 'SET_ERROR', payload: message });
       throw error;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
@@ -122,6 +128,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
       dispatch({ type: 'SET_ERROR', payload: message });
       throw error;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 

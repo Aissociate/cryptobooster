@@ -66,61 +66,142 @@ export class AuthService {
     Logger.info('SYSTEM', `Tentative de connexion pour ${credentials.email}`);
     
     try {
+      // 1. Authentification Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
         email: credentials.email,
         password: credentials.password
       });
 
       if (error) {
-        Logger.warning('SYSTEM', `Erreur connexion Supabase: ${error.message}`);
-        if (error.message.includes('Invalid login credentials')) {
-          throw new Error('Email ou mot de passe incorrect');
-        }
-        if (error.message.includes('Email not confirmed')) {
-          throw new Error('Veuillez confirmer votre email avant de vous connecter');
-        }
-        throw new Error(error.message);
+        Logger.error('SYSTEM', `Erreur authentification: ${error.message}`);
+        throw new Error('Email ou mot de passe incorrect');
       }
 
       if (!data.user) {
-        Logger.error('SYSTEM', 'Aucun utilisateur retourné par Supabase Auth');
         throw new Error('Erreur d\'authentification');
       }
 
-      Logger.success('SYSTEM', `Authentification Supabase réussie pour ${data.user.email}`);
-
-      // Récupérer le profil complet
-      const { data: profile, error: profileError } = await supabase
+      // 2. Récupérer ou créer le profil
+      let profile;
+      const { data: existingProfile, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', data.user.id)
-        .maybeSingle();
+        .single();
 
-      if (profileError && profileError.code !== 'PGRST116') {
+      if (profileError) {
+        if (profileError.code === 'PGRST116') {
+          // Profil n'existe pas, le créer
+          Logger.info('SYSTEM', 'Création du profil manquant');
+          const { data: newProfile, error: createError } = await supabase
+            .from('user_profiles')
+            .insert({
+              id: data.user.id,
+              name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Utilisateur',
+              subscription: 'free',
+              role: 'member'
+            })
+            .select()
+            .single();
+          
+          if (createError) {
+            Logger.error('SYSTEM', 'Erreur création profil', createError);
+            throw new Error('Erreur création profil');
+          }
+          profile = newProfile;
+        } else {
+          Logger.error('SYSTEM', 'Erreur récupération profil', profileError);
+          throw new Error('Erreur accès profil');
+        }
+      } else {
+        profile = existingProfile;
+      }
+
+      // 3. Construire l'objet utilisateur
+      const user: User = {
+        id: data.user.id,
+        name: profile.name,
+        email: data.user.email || '',
+        role: profile.role,
+        avatar: profile.avatar_url,
+        createdAt: new Date(profile.created_at),
+        lastLogin: new Date(),
+        subscription: profile.subscription
+      };
+
+      // 4. Mise à jour last_login (optionnel, ne fait pas échouer)
+      try {
+        await supabase
+          .from('user_profiles')
+          .update({ last_login: new Date().toISOString() })
+          .eq('id', data.user.id);
+      } catch (updateError) {
+        Logger.warning('SYSTEM', 'Impossible de mettre à jour last_login', updateError);
+      }
+
+      Logger.success('SYSTEM', `Connexion réussie pour ${user.name}`);
+      return user;
+
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur login complète', error);
+      const message = error instanceof Error ? error.message : 'Erreur de connexion';
+      throw new Error(message);
+    }
+  }
+
+  static async register(credentials: RegisterCredentials): Promise<User> {
+    Logger.info('SYSTEM', `Tentative d'inscription pour ${credentials.email}`);
+    
+    // Validation
+    if (credentials.password !== credentials.confirmPassword) {
+      throw new Error('Les mots de passe ne correspondent pas');
+    }
+
+    if (credentials.password.length < 6) {
+      throw new Error('Le mot de passe doit contenir au moins 6 caractères');
+    }
+
+    try {
+      // 1. Créer le compte Auth
+      const { data, error } = await supabase.auth.signUp({
+        email: credentials.email,
+        password: credentials.password,
+        options: {
+          data: {
+            name: credentials.name
+          }
+        }
+      });
+
+      if (error) {
+        Logger.error('SYSTEM', `Erreur inscription: ${error.message}`);
         Logger.error('SYSTEM', 'Erreur récupération profil', profileError);
         throw new Error('Erreur récupération profil utilisateur');
       }
 
-      // Si le profil n'existe pas, le créer
-      let userProfile = profile;
-      if (!profile) {
-        Logger.info('SYSTEM', `Création profil manquant pour ${data.user.email}`);
-        const { data: newProfile, error: createError } = await supabase
-          .from('user_profiles')
-          .insert({
-            id: data.user.id,
-            name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Utilisateur',
-            subscription: 'free',
-            role: 'member'
-          })
-          .select()
-          .single();
+      if (!data.user) {
+        throw new Error('Erreur création utilisateur');
+      }
 
-        if (createError) {
-          Logger.error('SYSTEM', 'Erreur création profil', createError);
-          throw new Error('Erreur création profil utilisateur');
-        }
-        userProfile = newProfile;
+      // 2. Le profil sera créé via trigger ou manuellement
+      const newUser: User = {
+        id: data.user.id,
+        name: credentials.name,
+        email: credentials.email.toLowerCase(),
+        role: 'member',
+        createdAt: new Date(),
+        subscription: 'free'
+      };
+
+      Logger.success('SYSTEM', `Inscription réussie pour ${newUser.name}`);
+      return newUser;
+
+    } catch (error) {
+      Logger.error('SYSTEM', 'Erreur register', error);
+      const message = error instanceof Error ? error.message : 'Erreur d\'inscription';
+      throw new Error(message);
+    }
+  }
       }
 
       // Mettre à jour last_login
