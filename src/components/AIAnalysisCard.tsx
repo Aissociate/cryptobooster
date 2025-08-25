@@ -166,7 +166,7 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({
           >
             <Star className="w-4 h-4 text-yellow-400" />
             <span className="text-yellow-400 text-sm font-medium">
-              {tradingSignal.confidence}% Confidence
+              {analysis.tradingSignal.confidence}% Confidence
             </span>
           </motion.div>
           
