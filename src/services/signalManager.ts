@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { Logger } from './logService';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface TradingPosition {
   id: string;
@@ -166,7 +167,7 @@ class SignalManagerService {
 
   async addPosition(crypto: any, analysis: any): Promise<TradingPosition> {
     const newPosition: TradingPosition = {
-      id: `pos_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: uuidv4(),
       cryptoId: crypto.id,
       cryptoSymbol: crypto.symbol,
       cryptoName: crypto.name,
